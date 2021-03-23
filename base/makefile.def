@@ -1,0 +1,8 @@
+
+
+LIBBASE=$(ROOTACT)/rtbase/lib/librtbase.a
+LIBDIA=$(ROOTACT)/libdIa/libdIa.a
+LIBCOAP=$(ROOTACT)/libcoap/libcoap.a
+
+LIBFTDI=/usr/local/lib/libftdi.a
+LIBMPSS=/usr/local/lib/libmpsse.a

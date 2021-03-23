@@ -1,0 +1,57 @@
+################################################################################
+include $(ROOTACT)/rtbase/base/makefile.def
+include $(ROOTACT)/lrr/base/makefile.def
+
+################################################################################
+
+ifneq ($(SYSTEM_NAME),)
+	# used to add a dependency on
+	TARGETDEF = $(ROOTACT)/lrr/com/makefile.target
+	include $(TARGETDEF)
+endif
+
+
+# HALVERSION_MAJOR defined in lrr/MAKE
+ifeq ($(HALVERSION_MAJOR),5)
+	CFLAGS += -DHAL_VERSION_5
+endif
+
+
+# not an option but mandatory
+CFLAGS += -Wno-unused-result -DLP_MODULE_LRR
+
+INC=-I../include -I../../include -I$(ROOTACT) -I$(ROOTACT)/include
+
+LIB=\
+	$(LIBBASE)
+
+HDEPS=\
+	../include/_whatstr.h\
+	define.h\
+	struct.h\
+	infrastruct.h
+
+
+################################################################################
+all	: ipv6gs.x ipvxchk.x ipvxifa.x nwkfilter.x rollovertus.x
+
+ipv6gs.x : ipv6gs.o $(LIB)
+	$(CC) $(STATIC) $(LDFLAGS) -o ipv6gs.x ipv6gs.o $(THREADLD)
+
+ipvxchk.x : ipvxchk.o $(LIB)
+	$(CC) $(STATIC) $(LDFLAGS) -o ipvxchk.x ipvxchk.o $(THREADLD)
+
+ipvxifa.x : ipvxifa.o $(LIB)
+	$(CC) $(STATIC) $(LDFLAGS) -o ipvxifa.x ipvxifa.o $(THREADLD)
+
+nwkfilter.x : networkfilter.o $(LIB)
+	$(CC) $(STATIC) $(LDFLAGS) -o nwkfilter.x networkfilter.o $(LIBBASE) $(THREADLD)
+
+rollovertus.x : rollovertus.o $(LIB)
+	$(CC) $(STATIC) $(LDFLAGS) -o rollovertus.x rollovertus.o $(LIBBASE) $(THREADLD)
+
+%.o	: %.c $(HDEPS)
+	$(CC) $(CFLAGS) -DNWF_MAIN $(INC) $(DEFINC) -c $<
+
+clean	:
+	@(rm _cproto.h *.x *.o *.a core *.log 2>/dev/null || exit 0)

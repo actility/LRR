@@ -1,0 +1,95 @@
+#!/bin/sh
+# vim: ft=sh: set noet ts=8 sw=8:
+
+if [ -z "$ROOTACT" ]
+then
+	Error "ROOTACT not specified"
+	exit 1
+fi
+
+. $ROOTACT/rtbase/base/system
+
+make -f makefile.launcher $*
+[ $? != 0 ] && exit 1
+make -f makefile.sshpass $*
+[ $? != 0 ] && exit 1
+make -f makefile.keys $*
+[ $? != 0 ] && exit 1
+make -f makefile.tools $*
+[ $? != 0 ] && exit 1
+
+[ -z $BUILD_MODE ] && BUILD_MODE=release
+[ "$BUILD_MODE" = "debug" ] && echo "!!!!!!!! DEBUG BUILD !!!!!!!!"
+
+configfile=$ROOTACT/lrr/targets/${SYSTEM}/system_definition.config
+if [ -f "$configfile" ]; then
+	. $configfile
+	echo "SYSTEM=$CONFIG_SYSTEM"
+	if [ "$CONFIG_ARCH_COMM" = "" ]; then
+		echo "CONFIG_ARCH_COMM not defined for system $SYSTEM. Check configuration files"
+		exit 1
+	fi
+	if [ "$CONFIG_ARCH_RADIO_VALUE" = "" ]; then
+		echo "CONFIG_ARCH_RADIO_VALUE not defined for system $SYSTEM. Check configuration files"
+		exit 1
+	fi
+
+	# TODO: ARCH_RADIO testing to be replaced in com/MAKE
+	export ARCH_RADIO=SX1301_X${CONFIG_ARCH_RADIO_VALUE}
+
+    # note WITH_SX1301_Xx and ARCH_COMM already added into CFLAGS in configuration and makefile.target
+	direxe="exe_${CONFIG_ARCH_COMM}_x${CONFIG_ARCH_RADIO_VALUE}"
+	echo "#"
+	echo "# building LRR using the $direxe makefile"
+	echo "#"
+	make -C $direxe $* BUILD_MODE=$BUILD_MODE
+	exit $?
+fi
+
+
+case	$SYSTEM	in
+	natrbpi_usb_v1.0)
+		make -C exe_usb_x1 $* ARCH_COMM=usb ARCH_RADIO=SX1301_X1
+	;;
+	rbpi_v1.0)
+		make -C exe_spi_x1 $* ARCH_COMM=spi ARCH_RADIO=SX1301_X1
+	;;
+	sempico)
+		make -C exe_tty_x1 $* ARCH_COMM=tty ARCH_RADIO=SX1301_X1
+	;;
+	ir910)
+		make -C exe_usb_x1 $* ARCH_COMM=usb ARCH_RADIO=SX1301_X1 
+	;;
+	ciscoms)
+		make -C exe_spi_x8 $* ARCH_COMM=spi ARCH_RADIO=SX1301_X8 BUILD_MODE=$BUILD_MODE
+	;;
+	fcmlb)
+		make -C exe_spi_x1 $* ARCH_COMM=spi ARCH_RADIO=SX1301_X1 BUILD_MODE=$BUILD_MODE
+	;;
+	fcpico|fclamp)
+		make -C exe_spi_x1 $* ARCH_COMM=spi ARCH_RADIO=SX1301_X1 BUILD_MODE=$BUILD_MODE
+	;;
+	fcloc)
+		make -C exe_spi_x8 $* ARCH_COMM=spi ARCH_RADIO=SX1301_X8 BUILD_MODE=$BUILD_MODE
+	;;
+        rfilr)
+                make -C exe_usb_x1 $* ARCH_COMM=usb ARCH_RADIO=SX1301_X1
+        ;;
+        oielec)
+                make -C exe_spi_x1 $* ARCH_COMM=spi ARCH_RADIO=SX1301_X1
+        ;;
+	flexpico)
+		make -C exe_spi_x1 $* ARCH_COMM=spi ARCH_RADIO=SX1301_X1 BUILD_MODE=$BUILD_MODE
+	;;
+	linux-x86|linux-x86_64|centos8-x86_64)
+		make -C exe_tty_x1 $* ARCH_COMM=tty ARCH_RADIO=SX1301_X1
+	;;
+	tracknet)
+		make -C exe_spi_x1 $* ARCH_COMM=spi ARCH_RADIO=SX1301_X1 BUILD_MODE=$BUILD_MODE
+	;;
+	*)
+		echo	"unknown system $SYSTEM"
+		exit 1
+	;;
+esac
+exit $?

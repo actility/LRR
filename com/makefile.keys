@@ -1,0 +1,52 @@
+################################################################################
+include $(ROOTACT)/rtbase/base/makefile.def
+include $(ROOTACT)/lrr/base/makefile.def
+
+################################################################################
+
+ifneq ($(SYSTEM_NAME),)	
+	# used to add a dependency on
+	TARGETDEF = $(ROOTACT)/lrr/com/makefile.target
+	include $(TARGETDEF)
+endif
+
+# HALVERSION_MAJOR defined in lrr/MAKE
+ifeq ($(HALVERSION_MAJOR),5)
+	CFLAGS += -DHAL_VERSION_5
+endif
+
+# not an option but mandatory
+CFLAGS += -DLP_MODULE_LRR -DMAIN
+
+INC=-I../include -I../../include -I$(ROOTACT) -I$(ROOTACT)/include
+
+LIB=\
+	$(LIBBASE)
+
+SRC=\
+	keycrypt.c
+
+OBJ=$(SRC:.c=.o)
+
+HDEPS=\
+	../include/_whatstr.h\
+	define.h\
+	struct.h\
+	infrastruct.h
+
+MYLDFLAGS=-lcrypto
+
+
+################################################################################
+EXELRR=keycrypt
+################################################################################
+all	: $(EXELRR).x
+
+$(EXELRR).x : $(OBJ) $(LIB)
+	$(CC) $(STATIC) $(LDFLAGS) -o $@ $^ $(MYLDFLAGS) $(THREADLD)
+
+%.o	: %.c $(HDEPS)
+	$(CC) $(CCFLAGS) $(INC) $(DEFINC) -c $<
+
+clean	:
+	@(rm _cproto.h *.x *.o *.a core *.log 2>/dev/null || exit 0)

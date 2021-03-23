@@ -1,0 +1,34 @@
+#!/bin/bash
+
+[ "$1" = "clean" ] && exit 0
+
+if [ -z "$ROOTACT" ]
+then
+        Error "ROOTACT not specified"
+        exit 1
+fi
+
+. $ROOTACT/rtbase/base/system
+ROOTACT_BCK=$ROOTACT
+
+sysdef="${ROOTACT}/lrr/system/system_definition.sh"
+if [ ! -f "$sysdef" ]
+then
+	echo "file '$sysdef' not found, ignored"
+	exit 0
+fi
+. $sysdef
+ROOTACT=$ROOTACT_BCK
+
+if [ "$DYNAMIC_HAL" = "y" ]; then
+    file="$ROOTACT/lora_gateway/libsx1301ar/libsx1301ar.so"
+    if [ -f "$file" ]
+    then
+        echo "Copying dynamic HAL file '$file'"
+        cp $file .
+       exit $?
+    else
+        echo "Can not found '$file'"
+        exit 0
+    fi
+fi

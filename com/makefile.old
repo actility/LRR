@@ -1,0 +1,123 @@
+################################################################################
+include $(ROOTACT)/rtbase/base/makefile.def
+include $(ROOTACT)/lrr/base/makefile.def
+
+################################################################################
+
+ARCH_RADIO=SX1301_X1
+#ARCH_RADIO=SX1301_X8
+
+ARCH_COMM=spi
+
+
+#ifeq ($(SYSTEM),natrbpi)
+#ARCH_RADIO=SX1301_X8
+#endif
+
+ifeq ($(SYSTEM),natrbpi)
+	ARCH_RADIO=SX1301_X1
+	ARCH_COMM=usb
+endif
+
+
+
+ifeq ($(ARCH_RADIO),SX1301_X1)
+# default options for SPI + SX1301 X1 + GPS on kerlink/wirma
+	CFLAGS += -DWITH_SX1301_X1 -DWITH_GPS
+	SEMTECH=lora_gateway_$(ARCH_COMM)_x1/libloragw
+	LIBSEMTECH=$(ROOTACT)/$(SEMTECH)/libloragw.a
+	INCSEMTECH=$(ROOTACT)/$(SEMTECH)/inc
+endif
+
+ifeq ($(ARCH_RADIO),SX1301_X8)
+# default options for SX1301 X8 - GPS on raspberry
+CFLAGS += -DWITH_SX1301_X8
+SEMTECH=SX1301array_driver
+LIBSEMTECH=$(ROOTACT)/$(SEMTECH)/libsx1301ar/libsx1301ar.a
+INCSEMTECH=$(ROOTACT)/$(SEMTECH)/libsx1301ar/inc
+endif
+
+# not an option but mandatory
+CFLAGS += -DLP_MODULE_LRR
+
+LIB=\
+	$(LIBSEMTECH)\
+	$(LIBBASE)
+
+INC=-I../include -I$(ROOTACT) -I$(ROOTACT)/include -I$(INCSEMTECH)
+
+
+#MYLDFLAGS=-lpcap -L/usr/local/lib -lmpsse -lrt
+#MYLDFLAGS=-lmpsse -lusb -lcrypto -lm -lrt
+#MYLDFLAGS=-lpcap -lmpsse -lcrypto -lm -lrt
+#MYLDFLAGS=-lmpsse -lcrypto -lm -lrt
+
+MYLDFLAGS=-lm -lrt
+
+ifeq ($(SYSTEM),wirmav2)
+#MYLDFLAGS=-lcrypto -lm -lrt
+MYLDFLAGS=-lm -lrt
+endif
+
+ifeq ($(SYSTEM),ir910)
+LIB += $(SDK)/usr/lib/libmpsse.a $(SDK)/usr/lib/libftdi1.a $(SDK)/usr/lib/libusb-1.0.a
+endif
+
+ifeq ($(SYSTEM),natrbpi)
+LIB += /usr/lib/libmpsse.a
+MYLDFLAGS=-lm -lrt -lftdi -lusb
+endif
+
+
+################################################################################
+EXELRR=lrr
+EXECRC=crc
+EXESSH=sshpass
+
+SRC=\
+	headerloramac.c\
+	crc-ccitt.c\
+	xlap.c\
+	inivar.c\
+	lgw_gen.c\
+	avdv.c\
+	netitf.c\
+	main.c
+
+ifeq ($(ARCH_RADIO),SX1301_X1)
+SRC += lgw_x1.c
+endif
+
+ifeq ($(ARCH_RADIO),SX1301_X8)
+SRC += lgw_x8.c
+SRC += spi_linuxdev.c
+endif
+
+OBJ=$(SRC:.c=.o)
+
+HDEPS=\
+	../include/_whatstr.h\
+	spi_linuxdev.h\
+	xlap.h\
+	define.h\
+	struct.h\
+	infrastruct.h
+
+
+################################################################################
+all	: $(EXELRR).x $(EXECRC).x $(EXESSH).x
+
+$(EXELRR).x : $(OBJ) $(OTHEROBJ) $(LIB)
+	$(CC) $(STATIC) $(LDFLAGS) -o $@ $^ $(MYLDFLAGS) $(THREADLD)
+
+$(EXECRC).x : crc-ccitt.o crcmain.o $(LIB)
+	$(CC) $(STATIC) $(LDFLAGS) -o $@ $^ $(MYLDFLAGS) $(THREADLD)
+
+$(EXESSH).x : sshpass.o
+	$(CC) $(STATIC) $(LDFLAGS) -o $@ $^ $(MYLDFLAGS) $(THREADLD)
+
+%.o	: %.c $(HDEPS)
+	$(CC) $(CCFLAGS) $(INC) $(DEFINC) -c $<
+
+clean	:
+	@(rm _cproto.h *.x *.o *.a core *.log 2>/dev/null || exit 0)

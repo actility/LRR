@@ -1,0 +1,94 @@
+################################################################################
+include $(ROOTACT)/lrr/targets/$(SYSTEM)/system_definition.config
+################################################################################
+
+ifneq ($(CONFIG_TOOLCHAIN_CONFIGURATION_FILE),)
+	# remove quotes
+	build_file=$(patsubst "%",%,$(CONFIG_TOOLCHAIN_CONFIGURATION_FILE))
+	include $(ROOTACT)/lrr/targets/$(build_file)
+endif
+
+# architecture
+cflags-$(CONFIG_ARCH_ARM)           += -DARCHARM
+cflags-$(CONFIG_ARCH_X86)           += -DARCHX86
+cflags-$(CONFIG_ARCH_MIPS)          += -DARCHMIPS
+
+# Capabilities
+cflags-$(CONFIG_WITH_GPS)           += -DWITH_GPS
+cflags-$(CONFIG_WITH_LBT)           += -DWITH_LBT
+
+# Bus
+cflags-$(CONFIG_WITH_SPI)           += -DWITH_SPI
+cflags-$(CONFIG_WITH_USB)           += -DWITH_USB
+cflags-$(CONFIG_WITH_TTY)           += -DWITH_TTY
+cflags-$(CONFIG_SPI_ATMEL)          += -DSPI_ATMEL
+cflags-$(CONFIG_MULTI_BOARD)        += -DWITH_MULTI_BOARD
+
+ifneq ($CONFIG_SPI_FTDI),)
+	CFG_SPI = ftdi
+else
+	CFG_SPI = native
+endif
+
+# FIRMWARE/OS
+cflags-$(CONFIG_STD_LINUX)          += -DSTD_LINUX
+cflags-$(CONFIG_KEROS)              += -DKEROS
+cflags-$(CONFIG_MLINUX)             += -DMLINUX
+cflags-$(CONFIG_TEKOS)              += -DTEKOS
+cflags-$(CONFIG_OPENWRT)            += -DOPENWRT
+cflags-$(CONFIG_UCLIBC)             += -DUCLIBC
+
+# Semtech ref design
+cflags-$(CONFIG_SEMTECH_V1_0)       += -DSEMTECH_V1_0
+cflags-$(CONFIG_SEMTECH_V1_5)       += -DSEMTECH_V1_5
+cflags-$(CONFIG_SEMTECH_V2_1)       += -DSEMTECH_V2_1
+
+# Manufacturer-specific settings
+cflags-$(CONFIG_WITH_USB_PROTECTION) += -DWITH_USB_PROTECTION
+cflags-$(CONFIG_WITH_LED_MGT)       += -DWITH_LED_MGT
+
+CFLAGS-TARGET = $(cflags-y)
+
+# RADIO
+CFLAGS-TARGET += -DWITH_SX1301_X$(CONFIG_ARCH_RADIO_VALUE)
+CFLAGS-TARGET += -DARCH_COMM=$(CONFIG_ARCH_COMM)
+CFLAGS-TARGET += -DBOARD_TYPE="x$(CONFIG_ARCH_RADIO_VALUE)"
+
+# for compatibitly with not updated makefile
+ARCH_COMM=$(patsubst "%",%,$(CONFIG_ARCH_COMM))
+
+CFLAGS += $(CFLAGS-TARGET)
+
+# SYSTEM information
+
+# convert the system name into a macro definition: in uppercase and with "." replaced with "_"
+system_upper=$(shell echo $(SYSTEM) | tr a-z A-Z)
+system_macro=$(shell echo $(system_upper) | sed 's/\./_/g')
+CFLAGS += -D$(system_macro) -DSYSTEM_NAME="$(SYSTEM)"
+
+ifneq ($(CONFIG_MANUFACTURER),"")
+    manufacturer_upper=$(shell echo $(CONFIG_MANUFACTURER) | tr a-z A-Z)
+    CFLAGS += -D$(manufacturer_upper)
+endif
+ifneq ($(CONFIG_FAMILY),"")
+    family_upper=$(shell echo $(CONFIG_FAMILY) | tr a-z A-Z)
+    CFLAGS += -D$(family_upper)
+endif
+
+# variable definition for Makefile
+ifneq ($(CONFIG_HAL_LIBRARY_NAME),)
+	HAL_LIBRARY_NAME = $(patsubst "%",%,$(CONFIG_HAL_LIBRARY_NAME))
+endif
+
+ifneq ($(CONFIG_SPI_DIR),)
+	SPI_DIR=$(subst ",,$(CONFIG_SPI_DIR))
+endif
+
+ifneq ($(CONFIG_RADIO_FILE),)
+	RADIO_FILE=$(subst ",,$(CONFIG_RADIO_FILE))
+endif
+
+ifneq ($(CONFIG_GET_CUSTOM_VERSION),)
+	GET_CUSTOM_VERSION=$(subst ",,$(CONFIG_GET_CUSTOM_VERSION))
+endif
+

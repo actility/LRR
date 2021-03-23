@@ -1,0 +1,693 @@
+#!/bin/sh
+# vim: ft=sh: set noet ts=4 sw=4:
+
+if [ -z "$ROOTACT" ]
+then
+	Error "ROOTACT not specified"
+	exit 1
+fi
+
+system_def=$ROOTACT/lrr/targets/$SYSTEM/system_definition.config
+if [ -f $system_def ]; then
+    # retrieve settings
+    source $system_def
+    # load new system-oriented functions
+    source $ROOTACT/lrr/com/system_api.sh
+fi
+
+
+TARGETS_DIR=$ROOTACT/lrr/targets
+TARGETS_CONFIG=$TARGETS_DIR
+
+Compile()
+{
+	if [ "$1" != "clean" ]; then
+		mkdir -p $ROOTACT/lrr/reg_comp_libs/$SYSTEM
+		if [ -f $ROOTACT/lrr/reg_comp_libs/$SYSTEM/rtbase.version ]
+		then
+			REG_COMP_VERS=$(cat $ROOTACT/lrr/reg_comp_libs/$SYSTEM/rtbase.version)
+			COMP_VERS=$(cat $ROOTACT/rtbase/Version)
+			if [ "$REG_COMP_VERS" != "$COMP_VERS" ]
+			then
+				echo "The required version for rtbase is $REG_COMP_VERS not $COMP_VERS"
+				echo "If you want to ignore this error remove reg_comp_libs/$SYSTEM/rtbase.version"
+				exit 1
+			fi
+		else
+			cp $ROOTACT/rtbase/Version $ROOTACT/lrr/reg_comp_libs/$SYSTEM/rtbase.version
+		fi
+	fi
+	if [ -f "$TARGETS_CONFIG/$SYSTEM.config" ]; then
+		# generate target-specific makefile from its definition
+		echo "###"
+		echo "### Process system-specific definition to create makefile and configuration files"
+		echo "###"
+		current=$(pwd)
+		cd com; make SYSTEM=$SYSTEM
+		cd $current
+	fi
+
+	if [ "$BUILD_METHOD" = "byconfig" ]; then
+		# includes HAL version definition
+		echo "###"
+		echo "### Analyze HAL API (function prototypes and version)"
+		echo "###"
+		HAL="$ROOTACT/lora_gateway/libloragw/inc"
+		cd configure
+		cmd="CPPFLAGS=\"-I$HAL\" CFLAGS=\"-I$HAL -Wall -Wextra -Werror\" ./makeconfig"
+		eval $cmd > /dev/null
+		ret=$?
+		if [ $? -ne 0 ]; then
+			exit $?
+		fi
+		cd ..
+	else
+
+		# temporary: create lrr/com/autoconfig.h to make Makefile dependency working
+		echo "" > $ROOTACT/lrr/com/autoconfig.h
+
+		# detect HAL Version, get the first number
+		HALVFILE=$ROOTACT/lora_gateway/VERSION
+		HALV_MAJOR=$(cat $HALVFILE 2>/dev/null | sed "s/\..*//")
+		HALV_MINOR=$(cat $HALVFILE 2>/dev/null | awk -F "." '{print $2}')
+	fi
+
+	# allow all modules to test gateway characteristics
+	processConfigFiles
+
+	MODULE="base include mac802154 com suplog moreini util_rssi_histogram util_spectral_scan sftp nano util_fpga_start util_reset stunnel gwmgr failovermgr ipsecmgr lib"
+	if [ "$SEMTECH_REFDESIGN" = "2.1" ] && [ "$MANUFACTURER" != "tektelic" ]; then
+		MODULE="$MODULE aes_keygen"
+	fi
+
+	case $SYSTEM in
+		linux-x86|linux-x86_64|centos8-x86_64)
+			MODULE="base include mac802154 com moreini"
+		;;
+	esac
+
+	for i in $MODULE
+	do
+		if [ -f $i/MAKE ]
+		then
+			cd $i
+			echo "#####"
+			echo "#####	$i"
+			echo "#####"
+			if [ "$BUILD_METHOD" = "byconfig" ]; then
+				# HALVERSION_xxx no more use in Makefile but still used in shell script (TODO)
+				HALVERSION_MAJOR="$HALV_MAJOR" HALVERSION_MINOR="$HALV_MINOR" sh ./MAKE $*
+				sh ./MAKE $*
+			else
+				HALVERSION_MAJOR="$HALV_MAJOR" HALVERSION_MINOR="$HALV_MINOR" sh ./MAKE $*
+			fi
+			res=$?
+			case $i in
+				com|suplog|gwmgr|moreini|include|mac802154|aes_keygen)
+					[ $res != 0 ] && echo "MAKE $i error" &&  exit 1
+				;;
+				sftp|nano|util_spectral_scan|util_rssi_histogram|util_fpga_start|util_reset|stunnel)
+					[ $res != 0 ] && echo "##### WARNING: Dependency error : $i"
+				;;
+				*)
+					echo "do not test return for MAKE $i on $SYSTEM"
+				;;
+			esac
+			cd ..
+		fi
+	done
+
+	# add extra tools used for production or testing
+	if [ -d $ROOTACT/tools ]; then
+		echo "##### Copy tools into lrr/tools"
+		cp -r $ROOTACT/tools $ROOTACT/lrr/
+	fi 
+
+	return 0
+}
+
+# Often missing in makefiles
+CleanPlus()
+{
+	rm -f */core.* > /dev/null 2>&1
+	rm -f */core > /dev/null 2>&1
+	rm -f */TRACE_* > /dev/null 2>&1
+	rm -f */*.log > /dev/null 2>&1
+	rm -f */nohup.out > /dev/null 2>&1
+	rm -f */*.pcap > /dev/null 2>&1
+}
+
+GenGitStatus()
+{
+	gitstatus=./gitstatus.txt
+	{
+		date
+		echo
+		echo "########## GIT STATUS #############"
+		git status
+		echo
+		echo "########## LAST COMMIT #############"
+		git log --oneline -1
+	} > $gitstatus
+}
+
+GenManifest()
+{
+	[ "$SYSTEM" != "ciscoms" ] && return
+	cat package/ciscoms/MANIFEST.orig | sed "s/LRRVERSION/$LRRVER/" > MANIFEST
+	cp -r package/ciscoms/scripts ./scripts
+}
+
+CleanManifest()
+{
+	[ "$SYSTEM" != "ciscoms" ] && return
+	rm -f MANIFEST
+	rm -rf ./scripts
+}
+
+GenRuntimeSystem()
+{
+	if	[ ! -f $ROOTACT/rtbase/base/TARGET ]
+	then
+		echo	"cannot find $ROOTACT/rtbase/base/TARGET"
+		exit	1
+	fi
+	mkdir -p $ROOTACT/lrr/base
+	cp $ROOTACT/rtbase/base/TARGET $ROOTACT/lrr/base/TARGET
+	echo $SYSTEM > $ROOTACT/lrr/base/SYSTEM
+}
+
+
+DisplayLrrConfigList()
+{
+	i=0
+	echo "0\t| <new target>"
+	for f in $(ls -C1 $TARGETS_CONFIG/*.config); do
+		system=$(basename $f)
+		system=${system%.config}
+		i=`expr $i + 1`
+		echo "$i\t| $system"
+		eval "CONFIG_$i=$system"
+	done
+	echo "> "
+}
+
+ChooseLrrConfig()
+{
+	file=$ROOTACT/rtbase/base/TARGET
+	rep=0
+	while [ "$rep" -eq "0" ]
+	do
+		tty > /dev/null 2>&1
+		if [ $? = "0" ]
+		then
+			DisplayLrrConfigList
+		fi
+
+		read rep
+
+		var="CONFIG_$rep"
+		eval target=\$$var
+		if [ -z "${target}" ]; then
+			echo "MAKE lrr: unknown target $rep"
+			tty > /dev/null 2>&1
+			if [ $? != "0" ]
+			then
+				exit 1
+			fi
+			rep=0
+		else
+			target_config=$TARGETS_CONFIG/${target}.config
+			file=$ROOTACT/rtbase/base/TARGET
+			sed 's/CONFIG_//g' $target_config > $file
+			sed -i '/CONFIG_TEMPO_/d' $file
+			# look for build file
+			file=$ROOTACT/lrr/base/targets.def
+		fi
+	done
+}
+
+EchoLrrTargetList()
+{
+	echo	"1    | linux-x86"
+	echo	"2    | linux-x86_64"
+	echo	"15   | wirmav2"
+	echo	"16   | rpib"
+	echo	"17   | natrbpi_usb_v1.0"
+	echo	"18   | rfilr"
+	echo	"19   | ir910"
+	echo	"20   | mtac_usb_v1.0"
+	echo	"21   | wirmams"
+	echo	"22   | ciscoms"
+	echo	"23   | fcmlb"
+	echo	"24   | fcloc"
+	echo	"25   | wirmaar"
+	echo	"26   | tek_mega64"
+	echo	"27   | wirmana"
+	echo	"28   | fcpico"
+	echo	"29   | oielec"
+	echo	"30   | gemtek"
+	echo	"31   | fclamp"
+	echo	"32   | stpico"
+	echo	"33   | mtac_v1.0"
+	echo	"34   | mtac_v1.5"
+	echo	"35   | mtcap"
+	echo	"36   | mtac_refresh_v1.5"
+	echo	"37   | rbpi_v1.0"
+	echo	"38   | mtcdt_ip67"
+	echo	"39   | flexpico"
+	echo	"40   | tek_macro16"
+	echo	"41   | tek_micro8"
+	echo	"42   | mtac_refresh_usb_v1.0"
+	echo	"43   | mtcdt_ip67_v2.1"
+	echo	"44   | tek_dish64"
+	echo	"45   | tracknet"
+	echo	"46   | sempico"
+	echo "> "
+}
+
+ChooseLrrTarget()
+{
+	file=$ROOTACT/rtbase/base/TARGET
+
+	if [ "$BUILD_METHOD" = "byconfig" ]; then
+		ChooseLrrConfig
+		return
+	fi
+
+	rep=0
+	while [ "$rep" -eq "0" ]
+	do
+		tty > /dev/null 2>&1
+		if [ $? = "0" ]
+		then
+			EchoLrrTargetList
+		fi
+
+		read rep
+
+		case $rep in
+		1|linux-x86)
+			echo "SYSTEM=linux-x86" > $file
+			;;
+		2|linux-x86_64)
+			echo "SYSTEM=linux-x86_64" > $file
+			;;
+		15|wirmav2)
+			echo "SYSTEM=wirmav2" > $file
+			;;
+		16|rpib)
+			echo "SYSTEM=rpib" > $file
+			;;
+		17|natrbpi_usb_v1.0)
+			echo "SYSTEM=natrbpi_usb_v1.0" > $file
+			;;
+		18|rfilr)
+			echo "SYSTEM=rfilr" > $file
+			;;
+		19|ir910)
+			echo "SYSTEM=ir910" > $file
+			;;
+		20|mtac_usb_v1.0)
+			echo "SYSTEM=mtac_usb_v1.0" > $file
+			;;
+		21|wirmams)
+			echo "SYSTEM=wirmams" > $file
+			;;
+		22|ciscoms)
+			echo "SYSTEM=ciscoms" > $file
+			;;
+		23|fcmlb)
+			echo "SYSTEM=fcmlb" > $file
+			;;
+		24|fcloc)
+			echo "SYSTEM=fcloc" > $file
+			;;
+		25|wirmaar)
+			echo "SYSTEM=wirmaar" > $file
+			;;
+		26|tek_mega64)
+			echo "SYSTEM=tek_mega64" > $file
+			;;
+		27|wirmana)
+			echo "SYSTEM=wirmana" > $file
+			;;
+		28|fcpico)
+			echo "SYSTEM=fcpico" > $file
+			;;
+		29|oielec)
+			echo "SYSTEM=oielec" > $file
+			;;
+		30|gemtek)
+			echo "SYSTEM=gemtek" > $file
+			;;
+		31|fclamp)
+			echo "SYSTEM=fclamp" > $file
+			;;
+		32|stpico)
+			echo "SYSTEM=stpico" > $file
+			;;
+		33|mtac_v1.0)
+			echo "SYSTEM=mtac_v1.0" > $file
+			;;
+		34|mtac_v1.5)
+			echo "SYSTEM=mtac_v1.5" > $file
+			;;
+		35|mtcap)
+			echo "SYSTEM=mtcap" > $file
+			;;
+		36|mtac_refresh_v1.5)
+			echo "SYSTEM=mtac_refresh_v1.5" > $file
+			;;
+		37|rbpi_v1.0)
+			echo "SYSTEM=rbpi_v1.0" > $file
+			;;
+		38|mtcdt_ip67)
+			echo "SYSTEM=mtcdt_ip67" > $file
+			;;
+		39|flexpico)
+			echo "SYSTEM=flexpico" > $file
+			;;
+		40|tek_macro16)
+			echo "SYSTEM=tek_macro16" > $file
+			;;
+		41|tek_micro8)
+			echo "SYSTEM=tek_micro8" > $file
+			;;
+		42|mtac_refresh_usb_v1.0)
+			echo "SYSTEM=mtac_refresh_usb_v1.0" > $file
+			;;
+		43|mtcdt_ip67_v2.1)
+			echo "SYSTEM=mtcdt_ip67_v2.1" > $file
+			;;
+		44|tek_dish64)
+			echo "SYSTEM=tek_dish64" > $file
+			;;
+		45|tracknet)
+			echo "SYSTEM=tracknet" > $file
+			;;
+		46|sempico)
+			echo "SYSTEM=sempico" > $file
+			;;
+		*)
+			echo "MAKE lrr: unknown target $rep"
+			tty > /dev/null 2>&1
+			if [ $? != "0" ]
+			then
+				exit 1
+			fi
+			rep=0
+			;;
+		esac
+	done
+}
+
+DoLrrTarget()
+{
+	if [ ! -f "$ROOTACT/rtbase/targeted" ]; then
+		echo "$ROOTACT"
+		ChooseLrrTarget
+		sh -x $ROOTACT/rtbase/base/system > $ROOTACT/rtbase/targeted 2>&1
+		cd $ROOTACT/rtbase
+		sh ./MAKE
+		. $ROOTACT/rtbase/base/system
+		echo "*** rtbase should now be compiled for [$SYSTEM] ***"
+		cd $ROOTACT/lrr
+	fi
+
+}
+
+InitLrr()
+{
+	# Clean and init lrr
+	CleanPlus
+	Compile clean
+	rm -f base/TARGET 2>&1
+	rm -f base/SYSTEM 2>&1
+	# Clean and init rtbase
+	cd $ROOTACT/rtbase
+	./MAKE clean
+	rm -f base/TARGET 2>&1
+	rm -f targeted 2>&1
+	cd $ROOTACT/lrr
+	DoLrrTarget
+	echo "*** lrr is ready to be compiled for [$SYSTEM] ***"
+}
+
+processConfigFiles() {
+	conf=$ROOTACT/lrr/targets/$SYSTEM/system_definition.config
+	if [ ! -f $conf ]; then
+		# old mechanism
+		return
+	fi
+
+	. ${ROOTACT}/lrr/com/system_api.sh
+	
+	echo "Processing of system definition file"
+	# Creation of system definition file from the system configuration (menuconfig)
+	setting=$ROOTACT/lrr/system
+	mkdir -p $setting
+	# remove comments and CONFIG_ prefix
+	conf=$ROOTACT/lrr/targets/$SYSTEM/system_definition.config
+	file=$setting/system_definition.sh
+	echo "# Automatically generated from $SYSTEM/system_definition.config"  > $file
+	echo "# Note: some information are not relevant for embedded LRR"  > $file
+	sed '/^#/ d; s/^CONFIG_//g' $conf >> $file
+
+
+	# source the cong file so we can get use file API to get other configuration files
+	# ROOTACT will be replaced with the gateway definition
+	savrootact=$ROOTACT
+	. $file
+	ROOTACT=$savrootact
+
+	# copy of system characteristics if it exists
+	SystemGetFilePath i"$ROOTACT/lrr/targets" "system_characteristics.sh"
+	file=$setting/system_characteristics.sh
+	# in case the target file was removed
+	rm -f $file
+	if [ ! -z  $sysfilepath ]; then
+		echo "Processing of system characteristics file: $sysfilepath"
+		cp $sysfilepath $file
+	fi
+
+	# copy of suplog definition if it exists
+	SystemGetFilePath "$ROOTACT/lrr/targets" "suplog_definition.config"
+	file=$setting/suplog_definition.sh
+	rm -f $file
+	if [ -z "$sysfilepath" ]; then
+		echo "==== ERROR: no SUPLOG definition file found for this system"
+		exit 1
+	fi
+	echo "Processing of system characteristics file: $sysfilepath"
+	# just in case it will be generated by menuconfig later
+	sed '/^#/ d; s/^CONFIG_//g' $sysfilepath >> $file
+
+	chmod -R a+x $setting/*
+
+	# check that static definition is complete
+	echo "Checking system definition"  
+	hostrootact=$ROOTACT
+	bash -c ". $hostrootact/lrr/com/system_setting.sh ; $hostrootact/lrr/com/system_def_tools/envvar_checking.sh build"
+	if [ $? -ne 0 ]; then
+		echo "Error while checking required system definition"
+		exit 1
+	fi
+	ROOTACT=$hostrootact
+}
+
+GenerateDoc()
+{
+	$ROOTACT/lrr/doc/doxygen/docgen.sh
+}
+
+PublishDoc()
+{
+	$ROOTACT/lrr/doc/publish.sh "preprod"
+}
+
+
+if [ ! -d "$ROOTACT/rtbase" ]; then
+	Error "No rtbase found ($ROOTACT/rtbase)"
+	exit 1
+fi
+
+
+# work-around to avoid fix in rtbase
+# rtbase/base/command.sh doesn't exist if a "init" was done done but didn't complete
+if [ ! -f $ROOTACT/rtbase/base/command.sh ]; then
+	touch $ROOTACT/rtbase/base/command.sh
+	chmod a+x $ROOTACT/rtbase/base/command.sh
+fi
+
+SELF=lrr
+# no system reference: if it is a new system, to be created with menuconfig
+if [ -f $ROOTACT/rtbase/base/TARGET ]; then
+    . $ROOTACT/rtbase/base/system
+    echo "#####"
+    echo "$SELF for $SYSTEM"
+else
+    # do not exit if option not related to building LRR
+    needed=1
+    for option in menuconfig doc publish; do
+        if [ "$1" = "$option" ]; then
+            needed=0
+            break
+        fi
+    done
+    if [ "$needed" = 1 ]; then
+        echo "No system defined. Please use menuconfig to define a new one"
+        exit 1
+    fi
+fi
+
+case  $# in
+	0)
+		DoLrrTarget
+		Compile
+		exit $?
+		;;
+	*)	case $1 in
+			src|source)
+				shift
+				./MAKE clean
+				sh ${MKPKGSOURCE} -p $SELF $*
+				exit 0
+			;;
+			runtime)
+				shift
+				DoLrrTarget
+				Compile
+				echo "#####"
+				echo "#####	Generating runtime package"
+				echo "#####"
+
+				processConfigFiles
+
+				GenRuntimeSystem
+				GenGitStatus
+				GenManifest
+
+				# any additional tool to built before making package?
+				SystemGetFilePath "$ROOTACT/lrr/build" "MAKE"
+				if [ -f "${sysfilepath}" ]; then
+					${sysfilepath}
+				fi
+
+				# no more the rtbase one
+				MKPKGRUNTIME=$ROOTACT/lrr/build/mkruntime.sh
+				sh ${MKPKGRUNTIME} -p $SELF
+				SystemGetFilePath "./package" "genpackage.sh"
+				if [ -f "$sysfilepath" ]
+				then
+					LRRVER=$(cat ./Version)
+					file="$ROOTACT/deliveries/lrr-$LRRVER-$SYSTEM.tar.gz"
+					if [ -f "$file" ]
+					then
+						${sysfilepath} $file
+					else
+						echo "genpackage failed, '$file' not found !"
+					fi
+				fi
+				CleanManifest
+				exit 0
+			;;
+			opkg)
+				shift
+				./MAKE
+				sh ${MKOPKG} -p $SELF
+				exit 0
+			;;
+			clean)
+				shift
+				CleanPlus
+				Compile clean
+				exit 0
+				;;
+			init|target)
+				shift
+				InitLrr
+				exit 0
+				;;
+			tag)
+				version=$(cat ./Version)
+				version=v${version}
+				echo "git tag -a $version -m'${version}'"
+				echo "git push origin --tags"
+				git tag -a $version -m${version}
+				git push origin --tags
+				exit 0
+			;;
+			delivery)
+				shift
+				author="$1"
+				version=$(cat ./Version)
+				./MAKE clean
+				./MAKE -s
+				if [ $? != 0 ]; then
+					echo "MAKE failed, not tagged"
+					exit 1
+				fi
+				./MAKE -s runtime
+				echo
+				echo "Do you want to tag this version $version ${author} ? (y|Y)"
+				read rep
+				case $rep in
+					y|Y)
+					./MAKE tag
+					;;
+				esac
+				if [ -z "${author}" ]; then
+					echo "no author specified, not delivered"
+					exit 0
+				fi
+				if [ ! -f ./LRR_DELIVERY.sh ]; then
+					echo "no author cmd for delivery, not delivered"
+				fi
+				echo "Do you want to deliver this version $version ${author} ? (y|Y)"
+				read rep
+				case $rep in
+					y|Y)
+					./LRR_DELIVERY.sh ${author} ${version}
+					;;
+				esac
+				exit 0
+			;;
+			rtbase)
+				# added to ease partners porting
+				shift
+				cd $ROOTACT/rtbase && ./MAKE system=$SYSTEM
+				exit $?
+			;;
+			menuconfig)
+				shift
+				$ROOTACT/lrr/build/edit_target_config.sh $SYSTEM
+				echo "###"
+				echo "### WARNING: NO DEPENDENCY ON CONFIGURATION FILE: CLEAN AND REBUILD RECOMMENDED"
+				echo "###"
+				exit 0
+			;;
+			doc)
+				# generate Doxygen documentation
+				shift
+				GenerateDoc
+				exit 0
+			;;
+			publish)
+				# publish Doxygen documentation in Product documentation
+				shift
+				PublishDoc
+				exit 0
+			;;
+			*)
+				DoLrrTarget
+				Compile $*
+				exit 0
+				;;
+		esac
+	;;
+esac
+
+echo "Usage: MAKE [clean|runtime|src|source|tag|delivery|menuconfig]doc|"
+exit 1
+

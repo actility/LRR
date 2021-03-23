@@ -1,0 +1,28 @@
+################################################################################
+include $(ROOTACT)/rtbase/base/makefile.def
+include $(ROOTACT)/lrr/base/makefile.def
+
+################################################################################
+
+ifneq ($(SYSTEM_NAME),)
+	# used to add a dependency on
+	TARGETDEF = $(ROOTACT)/lrr/com/makefile.target
+	include $(TARGETDEF)
+endif
+
+# not an option but mandatory
+CFLAGS += -Wno-unused-result -DLP_MODULE_LRR -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=600
+
+################################################################################
+EXESSH=sshpass
+################################################################################
+all	: $(EXESSH).x
+
+$(EXESSH).x : sshpass.o
+	$(CC) $(STATIC) $(LDFLAGS) -o $@ $^ $(MYLDFLAGS) $(THREADLD)
+
+%.o	: %.c $(HDEPS)
+	$(CC) $(CCFLAGS) $(INC) $(DEFINC) -c $<
+
+clean	:
+	@(rm _cproto.h *.x *.o *.a core *.log 2>/dev/null || exit 0)

@@ -1,0 +1,58 @@
+# vim: ft=make:
+
+# check if system uses new design
+conffile=$(ROOTACT)/lrr/targets/$(SYSTEM)/system_definition.config
+ifneq ("$(wildcard $(conffile))","")
+    include $(ROOTACT)/lrr/com/makefile.target
+endif
+
+#
+# raspberry pi, with Actility OS choice
+# toolchain is poky linux-gnueabi 1.4.1
+#
+ifeq ($(SYSTEM),rpib)
+  CC=arm-poky-linux-gnueabi-gcc  -march=armv6 -mthumb-interwork -mfloat-abi=softfp --sysroot=$(RPI_B_HOST_HOME)
+  CFLAGS=-pipe -g -feliminate-unused-debug-types -Wall -O3 -fPIC -DLINUX -DARCHARM
+  CFLAGSNOO=-pipe -g -feliminate-unused-debug-types -Wall -fPIC -DLINUX -DARCHARM
+  CCFLAGS=$(CFLAGS)
+  
+  LD=arm-poky-linux-gnueabi-gcc  -march=armv6 -mthumb-interwork -mfloat-abi=softfp --sysroot=$(RPI_B_HOST_HOME)
+  CCLD=$(CC)
+  LDFLAGS=-Wl,-O1 -Wl,--hash-style=gnu -Wl,--as-needed -L$(ROOTACT)/lib -L$(ROOTACT)/shlib
+  LDSOFLAGS=-Wl,-O1 -Wl,--hash-style=gnu -Wl,--as-needed -shared -fPIC -L$(ROOTACT)/lib -L$(ROOTACT)/shlib
+  
+  AR=ar
+  ARFLAGS=rv
+endif
+
+
+#
+#	raspberry pi native mode (iC880A USB 1.0) and cross compiled  mode (iC880A SPI 1.0)
+#
+
+ifeq ($(SYSTEM),$(filter $(SYSTEM),natrbpi_usb_v1.0 rbpi_v1.0))
+
+	CCFLAGS=$(CFLAGS)
+
+	ifeq ($(SYSTEM),natrbpi_usb_v1.0)
+	CC=gcc
+	CFLAGS=-Wall -O3 -fPIC -DLINUX -fPIC -g -DARCHARM -DNATRBPI_USB
+	CFLAGSNOO=-Wall -fPIC -DLINUX -fPIC -g -DARCHARM -DNATRBPI_USB
+	endif
+	ifeq ($(SYSTEM),rbpi_v1.0)
+	CC=arm-linux-gnueabihf-gcc
+	CFLAGS=-Wall -O3 -fPIC -DLINUX -fPIC -g -DARCHARM -DRBPI_V1_0
+	CFLAGSNOO=-Wall -fPIC -DLINUX -fPIC -g -DARCHARM -DRBPI_V1_0
+	LDFLAGS += -L$(ROOTACT)/lib -L$(SDK)/usr/lib -ldl
+	DEFINC += -I$(SDK)/usr/include
+	endif
+
+	LD=$(CC)
+	CCLD=$(CC)
+
+	LDSOFLAGS= -shared -fPIC -L$(ROOTACT)/lib -L$(ROOTACT)/shlib
+
+	AR=ar
+	ARFLAGS=rv
+endif
+
